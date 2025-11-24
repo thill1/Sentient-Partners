@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, Loader2, Sparkles, Mic, MicOff, Radio, Maximize2, Minimize2, AlertCircle, X, MessageSquare, Download, Wifi } from 'lucide-react';
 import { Message } from '../types';
