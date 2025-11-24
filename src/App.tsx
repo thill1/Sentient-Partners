@@ -1,41 +1,28 @@
-import React from 'react';
-import { Header } from './components/Header';
-import { Hero } from './components/Hero';
-import { Services } from './components/Services';
-import { DemoSection } from './components/DemoSection';
-import { Testimonials } from './components/Testimonials';
-import { Pricing } from './components/Pricing';
-import { FAQ } from './components/FAQ';
-import { Footer } from './components/Footer';
-import { CTASection } from './components/CTASection';
-import { Process } from './components/Process';
-import { ChatInterface } from './components/ChatInterface';
-import { BookingModal } from './components/BookingModal';
-import { ContactModal } from './components/ContactModal';
-import { Toast } from './components/Toast';
+import React from 'react'
 
 function App() {
   return (
-    <div className="min-h-screen selection:bg-brand-500 selection:text-white font-sans relative">
-      <Header />
-      <main>
-        <Hero />
-        <Services />
-        <Process />
-        <DemoSection />
-        <Pricing />
-        <Testimonials />
-        <FAQ />
-        <CTASection />
-      </main>
-      <Footer />
-      {/* Global Overlays */}
-      <ChatInterface />
-      <BookingModal />
-      <ContactModal />
-      <Toast />
+    <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-slate-50">
+      <div className="max-w-3xl px-6 text-center">
+        <h1 className="text-4xl md:text-5xl font-semibold mb-4">
+          Sentient Partners
+        </h1>
+        <p className="text-lg md:text-xl text-slate-300 mb-8">
+          AI, Automations & Always-On Revenue
+        </p>
+        <p className="text-sm md:text-base text-slate-400 mb-8">
+          If you see this screen, your Vite + React + GitHub Pages wiring is working.
+          Next step is to plug in your real Sentient Partners UI.
+        </p>
+        <a
+          href="https://cal.com/sentient-partners/meeting"
+          className="inline-flex items-center justify-center px-6 py-3 rounded-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium transition"
+        >
+          Book a Discovery Call
+        </a>
+      </div>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
