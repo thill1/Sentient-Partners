@@ -45,7 +45,7 @@ interface EmailResult {
   message: string;
 }
 
-const sendEmailData = async (data: any, subject: string): Promise<EmailResult> => {
+export const sendEmailData = async (data: any, subject: string): Promise<EmailResult> => {
   // FAST FAIL: Check Protocol
   if (typeof window !== 'undefined' && window.location.protocol === 'file:') {
     return { 
@@ -129,15 +129,15 @@ const tools: { functionDeclarations: FunctionDeclaration[] }[] = [{
   functionDeclarations: [
     {
       name: "scheduleMeeting",
-      description: "Opens the real-time booking calendar modal on the user's screen. Use this when the user wants to book a call.",
+      description: "Opens the real-time booking calendar modal on the user's screen. Use this when the user wants to book a call. You can also use this to re-open the calendar if the user asks (no parameters needed for re-opening).",
       parameters: {
         type: Type.OBJECT,
         properties: {
-          name: { type: Type.STRING, description: "User's full name" },
-          email: { type: Type.STRING, description: "User's email address" },
+          name: { type: Type.STRING, description: "User's full name (optional)" },
+          email: { type: Type.STRING, description: "User's email address (optional)" },
           date: { type: Type.STRING, description: "Preferred date in YYYY-MM-DD format (optional)" }
         },
-        required: ["name", "email"]
+        required: [] // Made optional to allow re-opening easily
       }
     },
     {
@@ -159,17 +159,27 @@ const tools: { functionDeclarations: FunctionDeclaration[] }[] = [{
 
 // --- Tool Implementations ---
 
-const scheduleMeeting = (name: string, email: string, date?: string) => {
+const scheduleMeeting = (name?: string, email?: string, date?: string) => {
   // Construct the Cal.com URL with pre-filled parameters
   const params = new URLSearchParams();
-  if (name) params.append('name', name);
-  if (email) params.append('email', email);
-  if (date) params.append('date', date);
+  
+  // STRICT VALIDATION: Ensure we don't pass strings like "null" or "undefined"
+  if (name && name !== 'null' && name !== 'undefined') params.append('name', name);
+  if (email && email !== 'null' && email !== 'undefined') params.append('email', email);
+  if (date && date !== 'null' && date !== 'undefined') params.append('date', date);
 
   const fullUrl = `${BOOKING_URL}?${params.toString()}`;
 
+  console.log("[GeminiService] Opening Calendar with URL:", fullUrl);
+
   if (typeof window !== 'undefined') {
+    // Dispatch to window (Standard)
     window.dispatchEvent(new CustomEvent('open-booking-modal', { 
+      detail: { url: fullUrl } 
+    }));
+    
+    // Dispatch to document (Fallback for some mobile/iframe contexts)
+    document.dispatchEvent(new CustomEvent('open-booking-modal', { 
       detail: { url: fullUrl } 
     }));
     
@@ -196,27 +206,36 @@ const captureLead = async (name: string, email: string, phone?: string, inquiry?
     dispatchToast("Information sent to team.", "success");
     return { success: true, message: "Lead information securely transmitted to the team." };
   } else {
-    dispatchToast(`Email Error: ${result.message}. Saving locally...`, "error");
+    // Graceful fallback
+    console.warn("Lead email failed, saving locally.");
+    
     const leadData = `LEAD CAPTURE\nName: ${name}\nEmail: ${email}\nPhone: ${phone}\nInquiry: ${inquiry}\nDate: ${new Date().toLocaleString()}`;
     downloadAsFile(`lead-${name.replace(/\s+/g, '-')}.txt`, leadData);
+    
+    // Show Info instead of Error for premium feel
+    dispatchToast("Saved to your device.", "info");
     return { success: false, message: "Network issue. Information saved to user's device." };
   }
 };
 
 const executeTool = async (name: string, args: any) => {
-  console.log(`Executing tool: ${name}`, args);
+  console.log(`[GeminiService] Executing tool: ${name}`, args);
+  const safeArgs = args || {}; 
   
-  if (name === "scheduleMeeting") {
-    await new Promise(r => setTimeout(r, 500));
-    return scheduleMeeting(args.name, args.email, args.date);
-  }
-  
-  if (name === "captureLead") {
-    await new Promise(r => setTimeout(r, 500));
-    return await captureLead(args.name, args.email, args.phone, args.inquiry);
-  }
+  try {
+    if (name === "scheduleMeeting") {
+      return scheduleMeeting(safeArgs.name, safeArgs.email, safeArgs.date);
+    }
+    
+    if (name === "captureLead") {
+      return await captureLead(safeArgs.name, safeArgs.email, safeArgs.phone, safeArgs.inquiry);
+    }
 
-  return { error: "Function not found" };
+    return { error: "Function not found" };
+  } catch (error: any) {
+    console.error(`[GeminiService] Error executing ${name}:`, error);
+    return { error: `Tool execution failed: ${error.message || "Unknown error"}` };
+  }
 };
 
 // --- Features ---
@@ -233,20 +252,22 @@ export const sendTranscript = async (chatLog: string, voiceLog: string) => {
     dispatchToast("Transcript sent successfully.", "success");
     return { success: true, message: "Sent" };
   } else {
-    console.error("Transcript send failed, initiating fallback download.");
-    dispatchToast(`Email Failed: ${result.message}`, "error");
+    console.warn("Transcript email failed, initiating fallback download.");
     
     // Fallback: Download file
     const fullLog = `SENTIENT PARTNERS TRANSCRIPT\nDate: ${new Date().toLocaleString()}\n\n--- CHAT LOG ---\n${chatLog}\n\n--- VOICE LOG ---\n${voiceLog}`;
     downloadAsFile(`transcript-${Date.now()}.txt`, fullLog);
     
-    return { success: false, message: result.message };
+    // Changed from "error" to "info" and rephrased message to be less alarming
+    dispatchToast("Transcript saved to your device.", "info");
+    
+    return { success: true, message: "Saved locally" };
   }
 };
 
 // --- Context Helper ---
 
-const getSystemInstructionWithContext = () => {
+export const getSystemInstructionWithContext = () => {
   let timeZone = "UTC";
   try {
     timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -264,6 +285,11 @@ const getSystemInstructionWithContext = () => {
 - User Timezone: ${timeZone}
 - Current Date: ${localDate}
 - Current Time: ${localTime}
+
+[EVENT HANDLING INSTRUCTIONS]
+- START UP: You must ALWAYS introduce yourself immediately when the session starts. Do not wait for the user to speak. Say "Hello, I'm the Sentient AI Assistant. How can I help you today?"
+- BOOKING: If the user indicates they want to book a time, call \`scheduleMeeting\` immediately. Do not ask for permission if the intent is clear.
+- RE-OPENING CALENDAR: If the user says they closed the calendar or wants to see it, call \`scheduleMeeting\` again.
 `;
 };
 
@@ -359,6 +385,17 @@ export const connectLiveSession = async (callbacks: {
   const ai = getClient();
   if (!ai) throw new Error("API Key missing");
 
+  // Force strict intro instructions for voice mode specifically
+  const voiceSystemInstruction = getSystemInstructionWithContext() + `
+  
+  [VOICE MODE ACTIVE]
+  CRITICAL PROTOCOL:
+  1. The user has just connected to voice.
+  2. You MUST speak first. Do not wait for the user.
+  3. Introduce yourself concisely (e.g., "Hi, I'm the Sentient AI. How can I help?").
+  4. If the user asks to book, call scheduleMeeting instantly.
+  `;
+
   const sessionPromise = ai.live.connect({
     model: 'gemini-2.5-flash-native-audio-preview-09-2025',
     callbacks: {
@@ -367,9 +404,11 @@ export const connectLiveSession = async (callbacks: {
         callbacks.onmessage(message);
 
         if (message.toolCall) {
+          console.log("[GeminiService] Received Tool Call from Live API", message.toolCall);
           const functionResponses = [];
           for (const fc of message.toolCall.functionCalls) {
-             const result = await executeTool(fc.name, fc.args);
+             // Safe execution with fallback for undefined args
+             const result = await executeTool(fc.name, fc.args || {});
              functionResponses.push({
                id: fc.id,
                name: fc.name,
@@ -396,7 +435,7 @@ export const connectLiveSession = async (callbacks: {
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
       },
-      systemInstruction: getSystemInstructionWithContext() + " You are in Voice Mode. Be concise. If user asks to email, use captureLead.",
+      systemInstruction: voiceSystemInstruction,
       tools: [...tools, { googleSearch: {} }], 
     },
   });

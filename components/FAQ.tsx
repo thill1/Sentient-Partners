@@ -3,7 +3,7 @@ import { FAQS } from '../constants';
 import { Plus, Minus } from 'lucide-react';
 
 export const FAQ: React.FC = () => {
-  const [openIndex, setOpenIndex] = useState<number | null>(0);
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
     <section id="faq" className="py-24 bg-white dark:bg-dark-bg">

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Sparkles, Mic, Play, MicOff, Radio, Maximize2, Minimize2, AlertCircle, X, ChevronDown, MessageSquare, Download, Wifi } from 'lucide-react';
+import { Send, Bot, Loader2, Sparkles, Mic, MicOff, Radio, Maximize2, Minimize2, AlertCircle, X, MessageSquare, Download, Wifi } from 'lucide-react';
 import { Message } from '../types';
 import { 
   sendMessageToGemini, 
@@ -52,6 +52,7 @@ export const ChatInterface: React.FC = () => {
 
   // Refs
   const sessionRef = useRef<any>(null);
+  const connectionActiveRef = useRef<boolean>(false); // Tracks intent to prevent race conditions
   const inputContextRef = useRef<AudioContext | null>(null);
   const outputContextRef = useRef<AudioContext | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
@@ -78,6 +79,52 @@ export const ChatInterface: React.FC = () => {
     return () => window.removeEventListener('open-sentient-chat', handleOpenEvent);
   }, []);
 
+  // Handle Booking Confirmation Event
+  useEffect(() => {
+    const handleBookingCompleted = async (e: CustomEvent) => {
+      console.log("[AI Agent] Booking event received", e.detail);
+      const data = e.detail;
+
+      // 1. Extract Time
+      let timeInfo = "the selected time";
+      if (data?.date) timeInfo = data.date;
+      if (data?.startTime) timeInfo = `${data.date || ''} at ${data.startTime}`;
+
+      // 2. Extract Client Name (Robust check for various Cal.com payload structures)
+      let clientName = "there"; 
+      if (data?.attendees && Array.isArray(data.attendees) && data.attendees.length > 0) {
+          clientName = data.attendees[0].name || clientName;
+      } else if (data?.responses?.name) {
+          clientName = data.responses.name;
+      } else if (data?.name) {
+          clientName = data.name;
+      } else if (data?.payload?.attendees?.[0]?.name) {
+          clientName = data.payload.attendees[0].name;
+      }
+
+      dispatchToast(`Booking Confirmed for ${clientName}!`, "success");
+
+      // 3. Formulate System Prompt
+      const systemPrompt = `SYSTEM_ALERT: The user ${clientName} has successfully booked an appointment for ${timeInfo}. 
+      Task:
+      1. Confirm the booking to the user by name (${clientName}).
+      2. Repeat the date and time explicitly.
+      3. Ask if they have any other questions before the call.`;
+
+      // 4. Send to appropriate model (Voice or Text)
+      if (activeTab === 'voice' && isLiveConnected && sessionRef.current) {
+        // Voice mode logic handled by model context updates or tools
+        console.log("Booking confirmed during voice session.");
+      } else {
+        // Text Mode: Inject system message to generate AI response (without showing user bubble)
+        await handleSystemInjection(systemPrompt);
+      }
+    };
+
+    window.addEventListener('booking-completed', handleBookingCompleted as EventListener);
+    return () => window.removeEventListener('booking-completed', handleBookingCompleted as EventListener);
+  }, [activeTab, isLiveConnected]);
+
   // Scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -89,17 +136,35 @@ export const ChatInterface: React.FC = () => {
     }
   }, [messages, activeTab, isLoading, isOpen]);
 
-  // Clean up Live API on unmount or tab switch
+  // Clean up Live API on unmount
   useEffect(() => {
     return () => {
       stopLiveSession();
     };
   }, []);
 
+  // Auto-connect and Cleanup Effect
   useEffect(() => {
-    if (activeTab !== 'voice' || !isOpen) {
-      stopLiveSession();
+    let timeoutId: any;
+
+    if (activeTab === 'voice' && isOpen) {
+      // Auto-connect if not connected, not loading, and no previous error
+      if (!isLiveConnected && !isVoiceLoading && !voiceError && !sessionRef.current) {
+         // Slight delay to ensure UI renders before requesting mic
+         timeoutId = window.setTimeout(() => {
+            startLiveSession();
+         }, 500);
+      }
+    } else {
+      // If switching away from voice or closing, stop session
+      if ((activeTab !== 'voice' || !isOpen) && (isLiveConnected || isVoiceLoading || sessionRef.current)) {
+           stopLiveSession();
+      }
     }
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [activeTab, isOpen]);
 
   // Logic to prepare transcript data
@@ -134,13 +199,8 @@ export const ChatInterface: React.FC = () => {
     setIsSaving(true);
     dispatchToast("Saving transcript...", "info");
     
-    const result = await sendTranscript(chatLog, voiceLog);
+    await sendTranscript(chatLog, voiceLog);
     
-    if (result.success) {
-      // Already toasted in service
-    } else {
-      // Already toasted in service
-    }
     setIsSaving(false);
   };
 
@@ -173,13 +233,11 @@ export const ChatInterface: React.FC = () => {
     if (hasChat || hasVoice) {
       setIsSaving(true);
       dispatchToast("Archiving session...", "info");
-
-      // Auto-save logic
-      await sendTranscript(chatLog, voiceLog);
+      // Don't await this, let it happen in background while closing
+      sendTranscript(chatLog, voiceLog).catch(console.error);
       setIsSaving(false);
     }
     
-    // Cleanup
     stopLiveSession();
     setIsOpen(false);
   };
@@ -209,6 +267,7 @@ export const ChatInterface: React.FC = () => {
     let rotation = 0;
 
     const render = () => {
+      if (!canvas) return;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       
@@ -274,6 +333,37 @@ export const ChatInterface: React.FC = () => {
 
   // --- Logic Implementations ---
 
+  // Used for "hidden" system prompts (like booking confirmations) in text mode
+  const handleSystemInjection = async (systemText: string) => {
+    if (isLoading) return;
+    setIsLoading(true);
+
+    const responseId = Date.now().toString();
+    setMessages(prev => [...prev, {
+      id: responseId,
+      role: 'model',
+      text: '',
+      isTyping: true,
+      timestamp: new Date()
+    }]);
+
+    try {
+      const stream = sendMessageToGemini(systemText);
+      let fullText = '';
+      
+      for await (const chunk of stream) {
+        fullText += chunk;
+        setMessages(prev => prev.map(msg => 
+          msg.id === responseId ? { ...msg, text: fullText.trim(), isTyping: false } : msg
+        ));
+      }
+    } catch (error) {
+      console.error("System Injection Error:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSend = async (textOverride?: string) => {
     const textToSend = textOverride || inputValue;
     if (!textToSend.trim() || isLoading) return;
@@ -328,19 +418,26 @@ export const ChatInterface: React.FC = () => {
   };
 
   const startLiveSession = async () => {
-    // Prevent starting live session if on file protocol
+    // 1. Check Protocol
     if (window.location.protocol === 'file:') {
         dispatchToast("Microphone access blocked by browser on file:// protocol. Please use a local server.", "error");
         return;
     }
 
+    // 2. Prevent Double Start
+    if (connectionActiveRef.current || isLiveConnected) return;
+    
+    // 3. Set Flags
+    connectionActiveRef.current = true; // Signal intent
     setIsVoiceLoading(true);
     setVoiceError(null);
+
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       const inputCtx = new AudioContextClass({ sampleRate: 16000 });
       const outputCtx = new AudioContextClass({ sampleRate: 24000 });
       
+      // CRITICAL: Resume contexts inside this user-triggered flow
       await inputCtx.resume();
       await outputCtx.resume();
 
@@ -366,18 +463,36 @@ export const ChatInterface: React.FC = () => {
         }
       }
       
+      // If user cancelled while we were getting mic
+      if (!connectionActiveRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        inputCtx.close();
+        outputCtx.close();
+        return;
+      }
+
       const sessionPromise = connectLiveSession({
         onopen: () => {
+          // Double check intent in case race condition
+          if (!connectionActiveRef.current) return;
+
           setIsLiveConnected(true);
           setIsVoiceLoading(false);
+          
           const source = inputCtx.createMediaStreamSource(stream);
           const processor = inputCtx.createScriptProcessor(4096, 1, 1);
           
           processor.onaudioprocess = (e) => {
+            // Guard against zombie processors
+            if (!connectionActiveRef.current) return;
+            
             const inputData = e.inputBuffer.getChannelData(0);
-            // Pass actual sample rate to prevent pitch issues
             const pcmBlob = createPcmBlob(inputData, inputCtx.sampleRate);
-            sessionPromise.then(session => session.sendRealtimeInput({ media: pcmBlob }));
+            sessionPromise.then(session => {
+               if (connectionActiveRef.current) {
+                 session.sendRealtimeInput({ media: pcmBlob });
+               }
+            });
           };
 
           source.connect(processor);
@@ -444,32 +559,47 @@ export const ChatInterface: React.FC = () => {
             audioSourcesRef.current.clear();
             nextStartTimeRef.current = 0;
             setIsPlayingAudio(false);
-            
-            // Clear pending transcription if interrupted
             currentOutputTransRef.current = '';
           }
         },
         onclose: () => {
           setIsLiveConnected(false);
           setIsPlayingAudio(false);
+          // If the server closes it, we respect that.
+          connectionActiveRef.current = false;
         },
         onerror: (e) => {
+          console.error("Live API Error", e);
           setIsVoiceLoading(false);
           setIsLiveConnected(false);
           setVoiceError("Connection failed.");
+          connectionActiveRef.current = false;
         }
       });
 
-      sessionRef.current = await sessionPromise;
+      // Handle Race Condition: User stopped while connecting
+      const session = await sessionPromise;
+      if (!connectionActiveRef.current) {
+        session.close();
+        return;
+      }
+      
+      sessionRef.current = session;
 
     } catch (error: any) {
+      console.error("Voice Connection Error:", error);
       setIsVoiceLoading(false);
       setIsLiveConnected(false);
       setVoiceError(error.message || "Connection failed.");
+      connectionActiveRef.current = false;
     }
   };
 
   const stopLiveSession = () => {
+    // 1. Signal intent immediately
+    connectionActiveRef.current = false;
+
+    // 2. Cleanup Audio Nodes
     if (scriptProcessorRef.current) {
       scriptProcessorRef.current.disconnect();
       scriptProcessorRef.current = null;
@@ -478,18 +608,22 @@ export const ChatInterface: React.FC = () => {
       sourceNodeRef.current.disconnect();
       sourceNodeRef.current = null;
     }
+    
+    // 3. Close Contexts
     if (inputContextRef.current) {
-      inputContextRef.current.close();
+      inputContextRef.current.close().catch(() => {});
       inputContextRef.current = null;
     }
     if (outputContextRef.current) {
-      outputContextRef.current.close();
+      outputContextRef.current.close().catch(() => {});
       outputContextRef.current = null;
     }
+    
+    // 4. Stop Playing Audio
     audioSourcesRef.current.forEach(src => { try { src.stop(); } catch(e) {} });
     audioSourcesRef.current.clear();
 
-    // Finalize any partial transcripts
+    // 5. Finalize Transcripts
     if (currentInputTransRef.current) {
         setTranscriptHistory(prev => [...prev, {role: 'user', text: currentInputTransRef.current}]);
     }
@@ -499,6 +633,15 @@ export const ChatInterface: React.FC = () => {
     currentInputTransRef.current = '';
     currentOutputTransRef.current = '';
 
+    // 6. Close Gemini Session
+    if (sessionRef.current) {
+      // Small timeout to ensure pending messages don't crash
+      const session = sessionRef.current;
+      sessionRef.current = null;
+      setTimeout(() => session.close(), 0);
+    }
+
+    // 7. Reset UI State
     setIsLiveConnected(false);
     setIsVoiceLoading(false);
     setIsPlayingAudio(false);
@@ -684,46 +827,40 @@ export const ChatInterface: React.FC = () => {
           <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden bg-gradient-to-br from-slate-900 to-black dark:from-black dark:to-[#050505]">
             <canvas ref={visualizerCanvasRef} className="absolute inset-0 w-full h-full opacity-60 pointer-events-none mix-blend-screen" />
             
-            <div className="relative z-10 flex flex-col items-center p-6 text-center w-full">
-              <div className="mb-10 relative">
-                 {/* Glow Effect */}
-                 <div className={`absolute inset-0 bg-brand-500 blur-3xl rounded-full opacity-20 transition-all duration-500 ${isLiveConnected ? 'scale-150 opacity-40' : 'scale-50'}`}></div>
-                 
+            {/* Top Right Toggle */}
+            <div className="absolute top-6 right-6 z-30">
                  <button
                    onClick={isLiveConnected ? stopLiveSession : startLiveSession}
                    disabled={isVoiceLoading}
-                   className={`w-28 h-28 rounded-full flex items-center justify-center transition-all duration-500 shadow-2xl relative z-10 border-[6px] backdrop-blur-md ${
+                   className={`p-4 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl backdrop-blur-md border ${
                      isVoiceLoading ? 'bg-slate-800 border-slate-700' : 
-                     isLiveConnected ? 'bg-red-500/90 hover:bg-red-600 border-red-400/50 shadow-red-500/50 scale-110' : 
-                     'bg-brand-600/90 hover:bg-brand-500 border-brand-400/50 shadow-brand-500/50 hover:scale-105'
+                     isLiveConnected ? 'bg-red-500 hover:bg-red-600 border-red-400 text-white shadow-red-500/30' : 
+                     'bg-brand-600 hover:bg-brand-500 border-brand-400 text-white shadow-brand-500/30'
                    }`}
+                   title={isLiveConnected ? "End Session" : "Start Voice Chat"}
                  >
-                   {isVoiceLoading ? <Loader2 size={40} className="animate-spin text-white" /> :
-                    isLiveConnected ? <MicOff size={40} className="text-white" /> :
-                    <Mic size={40} className="text-white" />}
+                   {isVoiceLoading ? <Loader2 size={24} className="animate-spin" /> :
+                    isLiveConnected ? <MicOff size={24} /> :
+                    <Mic size={24} />}
                  </button>
-              </div>
-              
-              <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">
-                {isLiveConnected ? (isPlayingAudio ? "Speaking..." : "Listening...") : "Tap to Speak"}
-              </h3>
-              
-              {/* Transcription Preview (Optional but good for feedback) */}
-              <div className="h-12 flex items-center justify-center">
-                 {isLiveConnected && (
-                    <p className="text-sm text-slate-300 animate-pulse">
-                        {currentInputTransRef.current ? "..." : (isPlayingAudio ? "AI Speaking..." : "")}
-                    </p>
-                 )}
-              </div>
-
-              <p className="text-sm text-slate-400 max-w-[240px] leading-relaxed">
-                {voiceError || (isLiveConnected ? "I'm listening. Ask about Tokyo time or our pricing models." : "Experience the world's most advanced conversational AI.")}
-              </p>
             </div>
+
+            {/* Error Message Only */}
+            {voiceError && (
+                <div className="relative z-10 px-6 py-2 bg-red-500/10 border border-red-500/20 rounded-full backdrop-blur-sm">
+                     <span className="text-red-400 text-sm flex items-center gap-2"><AlertCircle size={14}/> {voiceError}</span>
+                </div>
+            )}
+            
+            {/* Status Text (Connecting) */}
+            {isVoiceLoading && (
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 mt-20">
+                     <p className="text-brand-400 text-sm font-medium animate-pulse">Initializing Neural Uplink...</p>
+                </div>
+            )}
           </div>
         )}
       </div>
     </>
   );
-};
+}

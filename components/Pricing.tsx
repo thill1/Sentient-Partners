@@ -8,6 +8,10 @@ export const Pricing: React.FC = () => {
     window.dispatchEvent(new CustomEvent('open-booking-modal'));
   };
 
+  const openContact = () => {
+    window.dispatchEvent(new CustomEvent('open-contact-modal'));
+  };
+
   return (
     <section id="pricing" className="py-24 bg-white dark:bg-dark-bg border-t border-slate-100 dark:border-dark-border">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -64,7 +68,7 @@ export const Pricing: React.FC = () => {
               <Button 
                 variant={plan.highlight ? 'primary' : 'outline'} 
                 className={`w-full ${plan.highlight ? 'bg-white text-slate-900 hover:bg-slate-100' : ''}`}
-                onClick={openBooking}
+                onClick={plan.name === "Enterprise" ? openContact : openBooking}
               >
                 {plan.cta}
               </Button>

@@ -61,8 +61,8 @@ export const PRICING_PLANS = [
       "Multi-location Dashboard",
       "Dedicated Account Manager",
       "Custom API Integrations",
-      "White-label Options",
-      "SLA Guarantees"
+      "SLA Guarantees",
+      "Strategic Consulting"
     ],
     cta: "Contact Sales",
     highlight: false

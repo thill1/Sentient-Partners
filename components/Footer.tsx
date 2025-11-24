@@ -20,6 +20,29 @@ export const Footer: React.FC = () => {
     window.dispatchEvent(new CustomEvent('open-booking-modal'));
   };
 
+  const handleContact = () => {
+    window.dispatchEvent(new CustomEvent('open-contact-modal'));
+  };
+
+  const handleServiceClick = (e: React.MouseEvent, serviceId: string) => {
+    e.preventDefault();
+    
+    // Dispatch the custom event immediately
+    const event = new CustomEvent('open-service-modal', { 
+      detail: { id: serviceId } 
+    });
+    window.dispatchEvent(event);
+  };
+
+  const footerServices = [
+    { name: 'AI Voice Agents', id: 'voice' },
+    { name: 'Chat Automation', id: 'chat' },
+    { name: 'Web Development', id: 'web' },
+    { name: 'CRM Systems', id: 'crm' },
+    { name: 'Reputation Management', id: 'reputation' },
+    { name: 'Consulting', id: 'strategy' }
+  ];
+
   return (
     <footer id="contact" className="bg-white dark:bg-dark-bg border-t border-slate-200 dark:border-dark-border pt-20 pb-10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -59,10 +82,14 @@ export const Footer: React.FC = () => {
           <div className="md:col-span-3">
             <h4 className="font-bold text-slate-900 dark:text-white mb-6">Services</h4>
             <ul className="space-y-4">
-              {['AI Voice Agents', 'Chat Automation', 'Web Development', 'CRM Systems', 'Consulting'].map((item) => (
-                <li key={item}>
-                  <a href="#" className="text-slate-600 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 text-sm transition-colors">
-                    {item}
+              {footerServices.map((item) => (
+                <li key={item.id}>
+                  <a 
+                    href={`#service-${item.id}`}
+                    onClick={(e) => handleServiceClick(e, item.id)}
+                    className="text-slate-600 dark:text-slate-400 hover:text-brand-600 dark:hover:text-brand-400 text-sm transition-colors cursor-pointer block"
+                  >
+                    {item.name}
                   </a>
                 </li>
               ))}
@@ -79,10 +106,13 @@ export const Footer: React.FC = () => {
               <Button className="w-full justify-center" onClick={handleBookCall}>
                 Book Strategy Call
               </Button>
-              <div className="flex items-center text-sm text-slate-500 dark:text-slate-500 justify-center mt-4">
+              <button 
+                onClick={handleContact}
+                className="flex items-center text-sm text-slate-500 dark:text-slate-500 justify-center mt-4 hover:text-brand-600 dark:hover:text-brand-400 transition-colors w-full"
+              >
                 <Mail className="w-4 h-4 mr-2" />
                 hello@sentientpartners.com
-              </div>
+              </button>
             </div>
           </div>
         </div>

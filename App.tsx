@@ -11,6 +11,7 @@ import { CTASection } from './components/CTASection';
 import { Process } from './components/Process';
 import { ChatInterface } from './components/ChatInterface';
 import { BookingModal } from './components/BookingModal';
+import { ContactModal } from './components/ContactModal';
 import { Toast } from './components/Toast';
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
       {/* Global Overlays */}
       <ChatInterface />
       <BookingModal />
+      <ContactModal />
       <Toast />
     </div>
   );
