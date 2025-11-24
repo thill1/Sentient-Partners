@@ -1,0 +1,7 @@
+{
+  "name": "Sentient Partners",
+  "description": "Premium AI consulting agency website featuring interactive AI demos, dynamic aesthetics, and high-conversion landing pages.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
