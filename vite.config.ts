@@ -12,6 +12,6 @@ export default defineConfig(({ mode }) => {
     // CRITICAL: This must match your GitHub repository name. 
     // If you name your repo "sentient-partners", keep this.
     // If you name it something else, change this line.
-    base: '/sentient-partners/', 
+    base: '/Sentient-Partners/', 
   };
 });
